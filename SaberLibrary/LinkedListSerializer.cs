@@ -12,13 +12,6 @@ public class LinkedListSerializer : IListSerializer
     public const string InvalidFormatExceptionMessage = "Invalid file format";
     public const string EmptyFileExceptionMessage = "Empty file";
 
-    //the constructor with no parameters is required and no other constructors can be used.
-    [SuppressMessage("ReSharper", "EmptyConstructor")]
-    public LinkedListSerializer()
-    {
-        //...
-    }
-
     public Task<ListNode> DeepCopy(ListNode head)
     {
         if (head == null)
