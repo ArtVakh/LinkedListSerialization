@@ -1,10 +1,6 @@
-﻿using System.Diagnostics.CodeAnalysis;
-
-namespace SaberLibrary
+﻿namespace SaberLibrary
 {
     //Class can't be modified.
-	
-    [SuppressMessage("ReSharper", "InconsistentNaming")]
     public class ListNode
     {
         /// <summary>

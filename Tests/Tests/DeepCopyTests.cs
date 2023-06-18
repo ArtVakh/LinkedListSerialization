@@ -1,7 +1,9 @@
 using System.Threading.Tasks;
 
 using SaberLibrary;
+
 using Tests.Helpers;
+
 using Xunit;
 
 namespace Tests.Tests
@@ -15,7 +17,7 @@ namespace Tests.Tests
             var linkedList = TestHelper.InitList(100);
 
             //Act
-            
+
             var serializer = new LinkedListSerializer();
             var copy = await serializer.DeepCopy(linkedList);
 

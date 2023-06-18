@@ -2,28 +2,15 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace SaberLibrary;
 
-//Specify your class\file name and complete implementation.
 public class LinkedListSerializer : IListSerializer
 {
-    private readonly struct ListNodeData
-    {
-        public readonly string data;
-        public readonly int? randomIndex;
-
-        public ListNodeData(string data, int? randomIndex)
-        {
-            this.data = data;
-            this.randomIndex = randomIndex;
-        }
-    }
-
-    public const string SerializationFormat = "{0};{1}\n";
-
-    private const string InvalidFormatExceptionMessage = "Invalid file format";
+    public const string InvalidFormatExceptionMessage = "Invalid file format";
+    public const string EmptyFileExceptionMessage = "Empty file";
 
     //the constructor with no parameters is required and no other constructors can be used.
     [SuppressMessage("ReSharper", "EmptyConstructor")]
@@ -39,6 +26,44 @@ public class LinkedListSerializer : IListSerializer
             return null;
         }
 
+        return Task.Run(() => DeepCopyInner(head));
+    }
+
+    public Task<ListNode> Deserialize(Stream s)
+    {
+        if (s.Length == 0)
+        {
+            throw new ArgumentException(EmptyFileExceptionMessage);
+        }
+
+        return Task.Run(() => DeserializeInner(s));
+    }
+
+    public Task Serialize(ListNode head, Stream s)
+    {
+        if (head == null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return Task.Run(() => SerializeInner(head, s));
+    }
+
+    private static ListNode GetOrAddNode(IDictionary<int, ListNode> map, int nodeIndex)
+    {
+        if (map.TryGetValue(nodeIndex, out var randomNode))
+        {
+            return randomNode;
+        }
+
+        randomNode = new ListNode();
+        map.Add(nodeIndex, randomNode);
+
+        return randomNode;
+    }
+
+    private static ListNode DeepCopyInner(ListNode head)
+    {
         var dict = new Dictionary<ListNode, ListNode>();
         var newHead = new ListNode {Data = head.Data};
         dict.Add(head, newHead);
@@ -73,43 +98,56 @@ public class LinkedListSerializer : IListSerializer
             curNew = curNew.Next;
         }
 
-        return Task.FromResult(newHead);
+        return newHead;
     }
 
-    public async Task<ListNode> Deserialize(Stream s)
+    private static ListNode DeserializeInner(Stream s)
     {
-        using var sr = new StreamReader(s, leaveOpen: true);
-
-        var firstLine = await sr.ReadLineAsync().ConfigureAwait(false);
-        if (firstLine == null)
-        {
-            return null;
-        }
+        using var binaryReader = new BinaryReader(s, Encoding.UTF8, true);
 
         var map = new Dictionary<int, ListNode>();
-        var head = ProcessNode(firstLine, map, 0);
+        var i = 0;
+        var fileSize = binaryReader.BaseStream.Length;
 
-        var i = 1;
-        await foreach (var line in GetLines(sr).ConfigureAwait(false))
+        try
         {
-            var curNode = ProcessNode(line, map, i);
+            while (binaryReader.BaseStream.Position < fileSize)
+            {
+                ListNode randomNode = null;
 
-            curNode.Previous = map[i - 1];
-            map[i - 1].Next = curNode;
-            i++;
+                var hasRandomReference = binaryReader.ReadBoolean();
+                if (hasRandomReference)
+                {
+                    var randomReference = binaryReader.Read7BitEncodedInt();
+                    randomNode = GetOrAddNode(map, randomReference);
+                }
+
+                var curNode = GetOrAddNode(map, i);
+
+                var data = binaryReader.ReadString();
+                curNode.Data = data;
+                curNode.Random = randomNode;
+
+                if (i > 0)
+                {
+                    curNode.Previous = map[i - 1];
+                    curNode.Previous.Next = curNode;
+                }
+
+                i++;
+            }
+        }
+        catch (EndOfStreamException)
+        {
+            throw new FormatException(InvalidFormatExceptionMessage);
         }
 
-        return head;
+        return map[0];
     }
 
-    public async Task Serialize(ListNode head, Stream s)
+    private static async Task SerializeInner(ListNode head, Stream s)
     {
-        if (head == null)
-        {
-            return;
-        }
-
-        var map = new Dictionary<ListNode, int?>();
+        var map = new Dictionary<ListNode, int>();
 
         var cur = head;
         var i = 0;
@@ -121,87 +159,24 @@ public class LinkedListSerializer : IListSerializer
             cur = cur.Next;
         }
 
-        var sw = new StreamWriter(s, leaveOpen: true);
+        var sw = new BinaryWriter(s, Encoding.UTF8, true);
         await using (sw.ConfigureAwait(false))
         {
             cur = head;
             while (cur != null)
             {
-                var randomReference = cur.Random == null ? null : map[cur.Random];
+                var hasRandomReference = cur.Random != null;
+                sw.Write(hasRandomReference);
 
-                await sw.WriteAsync(string.Format(SerializationFormat, randomReference, cur.Data)).ConfigureAwait(false);
+                if (hasRandomReference)
+                {
+                    sw.Write7BitEncodedInt(map[cur.Random]);
+                }
+
+                sw.Write(cur.Data);
+
                 cur = cur.Next;
             }
-        }
-    }
-
-    private static ListNode ProcessNode(string line, Dictionary<int, ListNode> map, int position)
-    {
-        if (!map.TryGetValue(position, out var curNode))
-        {
-            curNode = new ListNode();
-            map.Add(position, curNode);
-        }
-
-        var nodeData = GetNodeData(line);
-        ListNode randomNode = null;
-        if (nodeData.randomIndex.HasValue)
-        {
-            var randomIndex = nodeData.randomIndex.Value;
-
-            if (!map.TryGetValue(randomIndex, out randomNode))
-            {
-                randomNode = new ListNode();
-                map.Add(randomIndex, randomNode);
-            }
-        }
-
-        curNode.Data = nodeData.data;
-        curNode.Random = randomNode;
-
-        return curNode;
-    }
-
-    private static ListNodeData GetNodeData(string line)
-    {
-        var delimiterIndex = line.IndexOf(';');
-        if (delimiterIndex == -1)
-        {
-            throw new FormatException(InvalidFormatExceptionMessage);
-        }
-
-        var data = string.Empty;
-
-        if (delimiterIndex < line.Length - 1)
-        {
-            data = line[(delimiterIndex + 1)..];
-        }
-
-        if (delimiterIndex == 0)
-        {
-            return new ListNodeData(data, null);
-        }
-
-        var numberString = line[..delimiterIndex];
-        if (!int.TryParse(numberString, out var number))
-        {
-            throw new FormatException(InvalidFormatExceptionMessage);
-        }
-
-        return new ListNodeData(data, number);
-    }
-
-    private static async IAsyncEnumerable<string> GetLines(TextReader stream)
-    {
-        while (true)
-        {
-            var line = await stream.ReadLineAsync();
-            if (line == null)
-            {
-                break;
-            }
-
-            yield return line;
         }
     }
 }

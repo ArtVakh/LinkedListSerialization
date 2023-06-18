@@ -1,6 +1,8 @@
-﻿using System.IO;
-using System.Text;
+﻿using System;
+using System.IO;
 using System.Threading.Tasks;
+
+using FluentAssertions;
 
 using SaberLibrary;
 
@@ -13,55 +15,86 @@ namespace Tests.Tests;
 public class SerializeTests
 {
     private const int BufferSize = 65536;
+    private const int ListLength = 1_000_000;
+    private const int Seed = 1;
 
-    private readonly LinkedListSerializer serializer;
-
-    public SerializeTests()
+    [Fact]
+    public async Task Serialize_Deserialize_Successful()
     {
-        serializer = new LinkedListSerializer();
+        //Arrange
+        var serializer = new LinkedListSerializer();
+        var linkedList = TestHelper.InitList(ListLength, Seed);
+
+        //Act
+        const string fileName = $"{nameof(Serialize_Deserialize_Successful)}.test";
+
+        var stream = new FileStream(
+            fileName,
+            FileMode.Create,
+            FileAccess.ReadWrite,
+            FileShare.Read,
+            BufferSize,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        ListNode result;
+        await using (stream)
+        {
+            await serializer.Serialize(linkedList, stream);
+
+            stream.Position = 0;
+
+            result = await serializer.Deserialize(stream);
+        }
+
+        //Assert
+        var cur = linkedList;
+        var curCopy = result;
+        var listNodeComparer = new ListNodeComparer();
+
+        while (cur != null)
+        {
+            Assert.Equal(cur, curCopy, listNodeComparer);
+
+            cur = cur.Next;
+            curCopy = curCopy.Next;
+        }
     }
 
     [Fact]
-    public async Task Serialize_List_Successful()
+    public async Task Deserialize_WrongFileContent_Failure()
     {
         //Arrange
-        var items = new ListNode[]
-        {
-            new() {Data = "emptyRandom"},
-            new() {Data = ";randomToSelf"},
-            new() {Data = ";randomToLast"},
-            new() {Data = "randomToZero;"},
-        };
-
-        items[1].Random = items[1];
-        items[2].Random = items[3];
-        items[3].Random = items[0];
-
-        var sb = new StringBuilder();
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, null, items[0].Data);
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, 1, items[1].Data);
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, 3, items[2].Data);
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, 0, items[3].Data);
-        var expectedContent = sb.ToString();
-
-        for (var i = 0; i < items.Length; i++)
-        {
-            if (i > 0)
-            {
-                items[i].Previous = items[i - 1];
-            }
-
-            if (i < items.Length - 1)
-            {
-                items[i].Next = items[i + 1];
-            }
-        }
-
+        var serializer = new LinkedListSerializer();
+        const string fileName = $"{nameof(Deserialize_WrongFileContent_Failure)}.test";
+        await File.WriteAllTextAsync(fileName, "Some Random Content");
 
         //Act
-        string fileContent;
+        var stream = new FileStream(
+            fileName,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.Read,
+            BufferSize,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-        const string fileName = $"{nameof(Serialize_List_Successful)}.test";
+        await using (stream)
+        {
+            Func<Task> act = () => serializer.Deserialize(stream);
+
+            //Assert
+            var exception = await act.Should().ThrowAsync<FormatException>();
+            exception.WithMessage(LinkedListSerializer.InvalidFormatExceptionMessage);
+        }
+    }
+
+    [Fact]
+    public async Task Deserialize_EmptyFile_Failure()
+    {
+        //Arrange
+        var serializer = new LinkedListSerializer();
+        const string fileName = $"{nameof(Deserialize_EmptyFile_Failure)}.test";
+
+        //Act
         var stream = new FileStream(
             fileName,
             FileMode.Create,
@@ -72,88 +105,11 @@ public class SerializeTests
 
         await using (stream)
         {
-            await serializer.Serialize(items[0], stream);
+            Func<Task> act = () => serializer.Deserialize(stream);
 
-            stream.Position = 0;
-
-            using var sr = new StreamReader(stream);
-            fileContent = await sr.ReadToEndAsync();
-        }
-
-        //Assert
-        Assert.Equal(expectedContent, fileContent);
-    }
-
-    [Fact]
-    public async Task Deserialize_List_Successful()
-    {
-        //Arrange
-        var expectedItems = new ListNode[]
-        {
-            new() {Data = "emptyRandom"},
-            new() {Data = ";randomToSelf"},
-            new() {Data = ";randomToLast"},
-            new() {Data = "randomToZero;"},
-        };
-
-        expectedItems[1].Random = expectedItems[1];
-        expectedItems[2].Random = expectedItems[3];
-        expectedItems[3].Random = expectedItems[0];
-
-        var sb = new StringBuilder();
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, null, expectedItems[0].Data);
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, 1, expectedItems[1].Data);
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, 3, expectedItems[2].Data);
-        sb.AppendFormat(LinkedListSerializer.SerializationFormat, 0, expectedItems[3].Data);
-        var fileContent = sb.ToString();
-
-        for (var i = 0; i < expectedItems.Length; i++)
-        {
-            if (i > 0)
-            {
-                expectedItems[i].Previous = expectedItems[i - 1];
-            }
-
-            if (i < expectedItems.Length - 1)
-            {
-                expectedItems[i].Next = expectedItems[i + 1];
-            }
-        }
-
-
-        //Act
-        ListNode deserializedHead;
-        const string fileName = $"{nameof(Deserialize_List_Successful)}.test";
-        var stream = new FileStream(
-            fileName,
-            FileMode.Create,
-            FileAccess.ReadWrite,
-            FileShare.Read,
-            BufferSize,
-            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-        await using (var sw = new StreamWriter(stream))
-        {
-            await sw.WriteAsync(fileContent);
-            await sw.FlushAsync();
-            stream.Position = 0;
-
-            deserializedHead = await serializer.Deserialize(stream);
-        }
-
-        //Assert
-        Assert.Equal(fileContent, fileContent);
-
-        var expected = expectedItems[0];
-        var curDeserialized = deserializedHead;
-        var listNodeComparer = new ListNodeComparer();
-
-        while (expected != null)
-        {
-            Assert.Equal(expected, curDeserialized, listNodeComparer);
-
-            expected = expected.Next;
-            curDeserialized = curDeserialized.Next;
+            //Assert
+            var exception = await act.Should().ThrowAsync<ArgumentException>();
+            exception.WithMessage(LinkedListSerializer.EmptyFileExceptionMessage);
         }
     }
 }
