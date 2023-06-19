@@ -12,6 +12,8 @@ public class LinkedListSerializer : IListSerializer
     public const string InvalidFormatExceptionMessage = "Invalid file format";
     public const string EmptyFileExceptionMessage = "Empty file";
 
+    private static readonly Encoding Encoding = Encoding.UTF8;
+
     public Task<ListNode> DeepCopy(ListNode head)
     {
         if (head == null)
@@ -44,15 +46,15 @@ public class LinkedListSerializer : IListSerializer
 
     private static ListNode GetOrAddNode(IDictionary<int, ListNode> map, int nodeIndex)
     {
-        if (map.TryGetValue(nodeIndex, out var randomNode))
+        if (map.TryGetValue(nodeIndex, out var node))
         {
-            return randomNode;
+            return node;
         }
 
-        randomNode = new ListNode();
-        map.Add(nodeIndex, randomNode);
+        node = new ListNode();
+        map.Add(nodeIndex, node);
 
-        return randomNode;
+        return node;
     }
 
     private static ListNode DeepCopyInner(ListNode head)
@@ -96,7 +98,7 @@ public class LinkedListSerializer : IListSerializer
 
     private static ListNode DeserializeInner(Stream s)
     {
-        using var binaryReader = new BinaryReader(s, Encoding.UTF8, true);
+        using var binaryReader = new BinaryReader(s, Encoding, true);
 
         var map = new Dictionary<int, ListNode>();
         var i = 0;
@@ -152,7 +154,7 @@ public class LinkedListSerializer : IListSerializer
             cur = cur.Next;
         }
 
-        var sw = new BinaryWriter(s, Encoding.UTF8, true);
+        var sw = new BinaryWriter(s, Encoding, true);
         await using (sw.ConfigureAwait(false))
         {
             cur = head;
